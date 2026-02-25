@@ -6,9 +6,24 @@ import pandas as pd
 from datetime import timedelta
 import io
 from scipy.io import savemat
+import gdown
+import os
 
 st.set_page_config(page_title="CGM Explorer", page_icon="📈", layout="wide")
-PARQUET_PATH = "./metabonet_public_2025.parquet"
+
+@st.cache_resource # Fondamentale: scarica il file una volta sola per sessione
+def download_parquet():
+    file_id = "1R-4JeAUCVm_0Xx8J4VgyC4jAly4G9rEc"
+    url = f'https://drive.google.com/uc?id={file_id}'
+    output = "metabonet_public_2025.parquet"
+    
+    if not os.path.exists(output):
+        with st.spinner("Scaricamento del database (700MB+) in corso... attendi..."):
+            gdown.download(url, output, quiet=False)
+    return output
+
+# Inizializza il database
+PARQUET_PATH = download_parquet()
 
 st.markdown("""
 <style>

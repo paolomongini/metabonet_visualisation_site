@@ -1,0 +1,7 @@
+streamlit
+duckdb
+plotly
+pandas
+scipy
+gdown
+os
