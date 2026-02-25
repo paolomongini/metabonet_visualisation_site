@@ -4,4 +4,3 @@ plotly
 pandas
 scipy
 gdown
-os
