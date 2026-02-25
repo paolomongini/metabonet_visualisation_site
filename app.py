@@ -12,12 +12,16 @@ import streamlit.components.v1 as components
 
 st.set_page_config(page_title="CGM Explorer", page_icon="📈", layout="wide")
 
-try:
-    with open("google_analytics.html", "r") as f:
-        html_code = f.read()
-        components.html(html_code, height=0)
-except FileNotFoundError:
-    st.error("File google_analytics.html not found!")
+def inject_ga():
+    try:
+        with open("google_analytics.html", "r") as f:
+            html_code = f.read()
+            # Usiamo height=0 e lo posizioniamo in alto
+            components.html(html_code, height=0)
+    except FileNotFoundError:
+        pass # Silenzioso per l'utente, o st.error per debug
+
+inject_ga()
 
 
 @st.cache_resource # Fondamentale: scarica il file una volta sola per sessione
