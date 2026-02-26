@@ -16,26 +16,31 @@ def inject_ga():
     try:
         with open("google_analytics.html", "r") as f:
             html_code = f.read()
-            # Usiamo height=0 e lo posizioniamo in alto
             components.html(html_code, height=0)
     except FileNotFoundError:
-        pass # Silenzioso per l'utente, o st.error per debug
+        pass
 
 inject_ga()
 
+# ── Defaults al primo caricamento ─────────────────────────────────────────────
+if "app_initialized" not in st.session_state:
+    st.session_state["app_initialized"]  = True
+    st.session_state["default_patient"]  = "P10"
+    st.session_state["default_date"]     = pd.Timestamp("2023-07-06")
+    st.session_state["default_mode"]     = "Manual"
+    st.session_state["default_window"]   = 2
+    st.session_state["offset"]           = None   # verrà calcolato dopo aver caricato le date
 
-@st.cache_resource # Fondamentale: scarica il file una volta sola per sessione
+@st.cache_resource
 def download_parquet():
     file_id = "1R-4JeAUCVm_0Xx8J4VgyC4jAly4G9rEc"
     url = f'https://drive.google.com/uc?id={file_id}'
     output = "metabonet_public_2025.parquet"
-    
     if not os.path.exists(output):
         with st.spinner("Scaricamento del database (700MB+) in corso... attendi..."):
             gdown.download(url, output, quiet=False)
     return output
 
-# Inizializza il database
 PARQUET_PATH = download_parquet()
 
 st.markdown("""
@@ -63,7 +68,6 @@ def get_all_patients():
 
 @st.cache_data
 def get_patient_summary():
-    """Pre-compute once: per-patient summary of available data types. Cached forever."""
     con = duckdb.connect()
     return con.execute(f"""
         SELECT
@@ -96,17 +100,16 @@ def get_filtered_patients(need_cgm, need_insulin, need_carbs,
                           therapy_filter, min_age, max_age, limit=None):
     summary = get_patient_summary()
     mask = pd.Series([True] * len(summary))
-    if need_cgm:              mask &= (summary['has_cgm']              == 1)
-    if need_insulin:          mask &= (summary['has_insulin']          == 1)
-    if need_carbs:            mask &= (summary['has_carbs']            == 1)
-    if need_heartrate:        mask &= (summary['has_heartrate']        == 1)
-    if need_steps:            mask &= (summary['has_steps']            == 1)
-    if need_workout_duration: mask &= (summary['has_workout_duration'] == 1)
-    if need_workout_intensity:mask &= (summary['has_workout_intensity']== 1)
-    if need_workout_label:    mask &= (summary['has_workout_label']    == 1)
+    if need_cgm:               mask &= (summary['has_cgm']               == 1)
+    if need_insulin:           mask &= (summary['has_insulin']           == 1)
+    if need_carbs:             mask &= (summary['has_carbs']             == 1)
+    if need_heartrate:         mask &= (summary['has_heartrate']         == 1)
+    if need_steps:             mask &= (summary['has_steps']             == 1)
+    if need_workout_duration:  mask &= (summary['has_workout_duration']  == 1)
+    if need_workout_intensity: mask &= (summary['has_workout_intensity'] == 1)
+    if need_workout_label:     mask &= (summary['has_workout_label']     == 1)
     if therapy_filter:
         mask &= summary['treatment_group'].isin(therapy_filter)
-    # Age filter (only when summary has age)
     if 'age' in summary.columns:
         if min_age is not None:
             mask &= (summary['age'].fillna(-1) >= min_age)
@@ -161,14 +164,14 @@ def get_daily_coverage(patient_id, need_cgm, need_insulin, need_carbs,
     """).df()
     df['day'] = pd.to_datetime(df['day'])
     df['complete'] = True
-    if need_cgm:              df['complete'] &= (df['has_cgm']              == 1)
-    if need_carbs:            df['complete'] &= (df['has_carbs']            == 1)
-    if need_insulin:          df['complete'] &= (df['has_insulin']          == 1)
-    if need_heartrate:        df['complete'] &= (df['has_heartrate']        == 1)
-    if need_steps:            df['complete'] &= (df['has_steps']            == 1)
-    if need_workout_duration: df['complete'] &= (df['has_workout_duration'] == 1)
-    if need_workout_intensity:df['complete'] &= (df['has_workout_intensity']== 1)
-    if need_workout_label:    df['complete'] &= (df['has_workout_label']    == 1)
+    if need_cgm:               df['complete'] &= (df['has_cgm']               == 1)
+    if need_carbs:             df['complete'] &= (df['has_carbs']             == 1)
+    if need_insulin:           df['complete'] &= (df['has_insulin']           == 1)
+    if need_heartrate:         df['complete'] &= (df['has_heartrate']         == 1)
+    if need_steps:             df['complete'] &= (df['has_steps']             == 1)
+    if need_workout_duration:  df['complete'] &= (df['has_workout_duration']  == 1)
+    if need_workout_intensity: df['complete'] &= (df['has_workout_intensity'] == 1)
+    if need_workout_label:     df['complete'] &= (df['has_workout_label']     == 1)
     return df
 
 @st.cache_data
@@ -193,27 +196,41 @@ def get_patient_metadata(patient_id):
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### Patient Selection")
-    mode = st.radio("Mode", ["Manual", "Filter by data"], horizontal=True)
+
+    mode = st.radio(
+        "Mode",
+        ["Manual", "Filter by data"],
+        index=["Manual", "Filter by data"].index(st.session_state.get("default_mode", "Manual")),
+        horizontal=True,
+    )
 
     therapy_filter = []
-    # defaults for new filters
     need_heartrate = need_steps = need_workout_duration = need_workout_intensity = need_workout_label = False
     min_age = max_age = None
 
     if mode == "Manual":
         need_cgm = need_insulin = need_carbs = False
         patients = get_all_patients()
-        selected = st.selectbox("Patient ID", ["— select —"] + patients)
+
+        # Calcola index di default per il selectbox
+        default_pid = st.session_state.get("default_patient", None)
+        if default_pid and default_pid in patients:
+            default_selectbox_idx = patients.index(default_pid) + 1  # +1 per "— select —"
+        else:
+            default_selectbox_idx = 0
+
+        selected = st.selectbox("Patient ID", ["— select —"] + patients, index=default_selectbox_idx)
+
     else:
         st.markdown("**Show only patients with:**")
-        need_cgm              = st.checkbox("CGM data",              value=True)
-        need_insulin          = st.checkbox("Insulin data",          value=False)
-        need_carbs            = st.checkbox("Carbs data",            value=False)
-        need_heartrate        = st.checkbox("Heart Rate data",       value=False)
-        need_steps            = st.checkbox("Steps data",            value=False)
-        need_workout_duration = st.checkbox("Workout Duration",      value=False)
-        need_workout_intensity= st.checkbox("Workout Intensity",     value=False)
-        need_workout_label    = st.checkbox("Workout Label",         value=False)
+        need_cgm               = st.checkbox("CGM data",          value=True)
+        need_insulin           = st.checkbox("Insulin data",       value=False)
+        need_carbs             = st.checkbox("Carbs data",         value=False)
+        need_heartrate         = st.checkbox("Heart Rate data",    value=False)
+        need_steps             = st.checkbox("Steps data",         value=False)
+        need_workout_duration  = st.checkbox("Workout Duration",   value=False)
+        need_workout_intensity = st.checkbox("Workout Intensity",  value=False)
+        need_workout_label     = st.checkbox("Workout Label",      value=False)
 
         st.markdown("**Age range:**")
         col_age1, col_age2 = st.columns(2)
@@ -221,11 +238,11 @@ with st.sidebar:
             min_age_input = st.number_input("Min age", min_value=0, max_value=120, value=0, step=1)
         with col_age2:
             max_age_input = st.number_input("Max age", min_value=0, max_value=120, value=120, step=1)
-        min_age = min_age_input if min_age_input > 0 else None
+        min_age = min_age_input if min_age_input > 0   else None
         max_age = max_age_input if max_age_input < 120 else None
 
         st.markdown("**Therapy type:**")
-        all_therapies = get_therapy_types()
+        all_therapies  = get_therapy_types()
         therapy_filter = st.multiselect("Treatment group", all_therapies, placeholder="All therapies")
 
         col_ps, col_all_check = st.columns([3, 1])
@@ -260,10 +277,10 @@ with st.sidebar:
         )
 
         if search_all:
-            filtered  = get_filtered_patients(**_filter_kwargs, limit=None)
-            shown     = filtered
-            has_more  = False
-            label     = f"<b>{len(filtered)}</b> patients found"
+            filtered = get_filtered_patients(**_filter_kwargs, limit=None)
+            shown    = filtered
+            has_more = False
+            label    = f"<b>{len(filtered)}</b> patients found"
         else:
             filtered = get_filtered_patients(**_filter_kwargs, limit=page_end)
             shown    = filtered
@@ -291,56 +308,55 @@ with st.sidebar:
 
     st.divider()
     st.markdown("### Options")
-    window_days = st.slider("Days per window", 1, 7, 2)
+
+    window_days = st.slider(
+        "Days per window", 1, 7,
+        value=st.session_state.get("default_window", 2),
+    )
 
     if selected != "— select —":
         p_min_temp, _ = get_patient_dates(selected)
-        off_temp = st.session_state.get("offset", 0)
-        window_start = p_min_temp.normalize() + timedelta(days=off_temp)
-        window_end = window_start + timedelta(days=window_days)
+        off_temp      = st.session_state.get("offset") or 0
+        window_start  = p_min_temp.normalize() + timedelta(days=off_temp)
+        window_end    = window_start + timedelta(days=window_days)
 
     if selected != "— select —" and 'filtered' in locals() and len(shown) > 0:
-            st.divider()
-            st.markdown("### 💾 MATLAB Export")
-            st.caption(f"Genera .mat per TUTTI i {len(shown)} pazienti trovati")
-    
+        st.divider()
+        st.markdown("### 💾 MATLAB Export")
+        st.caption(f"Genera .mat per TUTTI i {len(shown)} pazienti trovati")
+
     if st.button("Preparazione file .mat", use_container_width=True):
-        mat_data = {}
+        mat_data     = {}
         progress_bar = st.progress(0)
-        
         for i, p_id in enumerate(shown):
             p_min_full, p_max_full = get_patient_dates(p_id)
             p_df = get_window_data(p_id, p_min_full, p_max_full)
-            
             if not p_df.empty:
                 safe_id = f"id_{p_id.replace('-', '_')}"
                 mat_data[safe_id] = {
-                    'patient_id': p_id,
-                    'time': p_df['date'].dt.strftime('%Y-%m-%d %H:%M:%S').values,
-                    'cgm': p_df['CGM'].values,
-                    'carbs': p_df['carbs'].values,
-                    'bolus': p_df['bolus'].values,
-                    'insulin': p_df['insulin'].values,
-                    'basal': p_df['basal'].values,
-                    'heartrate': p_df['heartrate'].values if 'heartrate' in p_df else [],
-                    'steps': p_df['steps'].values if 'steps' in p_df else [],
-                    'workout_duration': p_df['workout_duration'].values if 'workout_duration' in p_df else [],
+                    'patient_id':        p_id,
+                    'time':              p_df['date'].dt.strftime('%Y-%m-%d %H:%M:%S').values,
+                    'cgm':               p_df['CGM'].values,
+                    'carbs':             p_df['carbs'].values,
+                    'bolus':             p_df['bolus'].values,
+                    'insulin':           p_df['insulin'].values,
+                    'basal':             p_df['basal'].values,
+                    'heartrate':         p_df['heartrate'].values         if 'heartrate'         in p_df else [],
+                    'steps':             p_df['steps'].values             if 'steps'             in p_df else [],
+                    'workout_duration':  p_df['workout_duration'].values  if 'workout_duration'  in p_df else [],
                     'workout_intensity': p_df['workout_intensity'].values if 'workout_intensity' in p_df else [],
                 }
-            
             progress_bar.progress((i + 1) / len(shown))
-        
         if mat_data:
             buf = io.BytesIO()
             savemat(buf, mat_data)
             progress_bar.empty()
-            
             st.download_button(
                 label="📥 Scarica .mat",
                 data=buf.getvalue(),
-                file_name=f"metabonet_page_data.mat",
+                file_name="metabonet_page_data.mat",
                 mime="application/octet-stream",
-                use_container_width=True
+                use_container_width=True,
             )
         else:
             st.error("Nessun dato trovato per questi pazienti.")
@@ -352,7 +368,20 @@ if selected in ["— select —", "— seleziona —"]:
 
 # ── Reset offset on patient change ───────────────────────────────────────────
 if "last_patient" not in st.session_state or st.session_state["last_patient"] != selected:
-    st.session_state["offset"] = 0
+    # Calcola offset dalla data di default (solo al primissimo caricamento su P10)
+    default_date = st.session_state.get("default_date", None)
+    if default_date is not None:
+        try:
+            p_min_for_offset, _ = get_patient_dates(selected)
+            p_min_for_offset    = p_min_for_offset.normalize()
+            computed_offset     = max(0, (default_date.normalize() - p_min_for_offset).days)
+            st.session_state["offset"] = computed_offset
+        except Exception:
+            st.session_state["offset"] = 0
+        # Cancella il default così i click successivi non lo reimpostano
+        del st.session_state["default_date"]
+    else:
+        st.session_state["offset"] = 0
     st.session_state["last_patient"] = selected
 
 # ── Patient date range ────────────────────────────────────────────────────────
@@ -373,18 +402,18 @@ daily = get_daily_coverage(
     need_workout_intensity=need_workout_intensity,
     need_workout_label=need_workout_label,
 )
-offset = st.session_state.get("offset", 0)
+offset      = st.session_state.get("offset", 0)
 current_day = pat_min + timedelta(days=offset)
 
 timeline_fig = go.Figure()
 
 for _, row in daily.iterrows():
-    color     = "#2ecc71" if row['complete'] else "#dde3ea"
-    border    = "#27ae60" if row['complete'] else "#b0b8c1"
-    day_ts    = row['day']
+    color      = "#2ecc71" if row['complete'] else "#dde3ea"
+    border     = "#27ae60" if row['complete'] else "#b0b8c1"
+    day_ts     = row['day']
     day_center = day_ts + timedelta(hours=12)
     is_current = (day_ts >= current_day) and (day_ts < current_day + timedelta(days=window_days))
-    border_w  = 2.5 if is_current else 0.5
+    border_w   = 2.5 if is_current else 0.5
 
     timeline_fig.add_trace(go.Bar(
         x=[day_center],
@@ -434,15 +463,13 @@ if timeline_event and timeline_event.get("selection") and timeline_event["select
             st.session_state["offset"] = new_offset
             st.rerun()
 
-offset = st.session_state.get("offset", 0)
+offset       = st.session_state.get("offset", 0)
 window_start = pat_min + timedelta(days=offset)
 window_end   = window_start + timedelta(days=window_days)
 
-
 st.divider()
 
-
-# ── patient characteristics ───────────────────────────────────────────────────
+# ── Patient characteristics ───────────────────────────────────────────────────
 meta = get_patient_metadata(selected)
 
 st.markdown("### Patient Profile")
@@ -451,23 +478,19 @@ col_id, col_m1, col_m2, col_m3, col_m4 = st.columns([1.5, 1, 1, 1, 1.5])
 
 with col_id:
     st.markdown(f"**Patient ID:** {meta['id']}")
-
 with col_m1:
     age_val = f"{int(meta['age'])}" if pd.notnull(meta['age']) else "N/A"
     st.markdown(f"**Age:** {age_val}")
     st.markdown(f"**Gender:** {meta['gender'] if pd.notnull(meta['gender']) else 'N/A'}")
-
 with col_m2:
     st.markdown(f"**Ethnicity:** {meta['ethnicity'] if pd.notnull(meta['ethnicity']) else 'N/A'}")
     diag_val = f"{int(meta['age_diagnosis'])}" if pd.notnull(meta['age_diagnosis']) else "N/A"
     st.markdown(f"**Diagnosis Age:** {diag_val}")
-
 with col_m3:
     weight_val = f"{meta['weight']:.1f} kg" if pd.notnull(meta['weight']) else "N/A"
     st.markdown(f"**Weight:** {weight_val}")
     height_val = f"{meta['height']:.1f} cm" if pd.notnull(meta['height']) else "N/A"
     st.markdown(f"**Height:** {height_val}")
-
 with col_m4:
     st.markdown(f"**Therapy:** `{meta['treatment_group'] if pd.notnull(meta['treatment_group']) else 'N/A'}`")
     st.markdown(f"**Device:** {meta['cgm_device'] if pd.notnull(meta['cgm_device']) else 'N/A'}")
@@ -498,49 +521,49 @@ df = get_window_data(selected, window_start, window_end)
 df['date'] = pd.to_datetime(df['date'])
 
 df_cgm   = df[df['CGM'].notna()].copy()
-df_meals = df[df['carbs'].notna() & (df['carbs'] > 0)].copy()
-df_bolus = df[df['bolus'].notna()  & (df['bolus']  > 0)].copy()
-df_ins   = df[df['insulin'].notna() & (df['insulin'] > 0)].copy()
-df_basal = df[df['basal'].notna()  & (df['basal']  > 0)].copy()
+df_meals = df[df['carbs'].notna()  & (df['carbs']   > 0)].copy()
+df_bolus = df[df['bolus'].notna()  & (df['bolus']   > 0)].copy()
+df_ins   = df[df['insulin'].notna()& (df['insulin'] > 0)].copy()
+df_basal = df[df['basal'].notna()  & (df['basal']   > 0)].copy()
 
-# ── New signal dataframes ─────────────────────────────────────────────────────
-df_hr       = df[df['heartrate'].notna() & (df['heartrate'] > 0)].copy()     if 'heartrate'         in df.columns else pd.DataFrame()
-df_steps    = df[df['steps'].notna()     & (df['steps']     > 0)].copy()     if 'steps'             in df.columns else pd.DataFrame()
-df_wdur     = df[df['workout_duration'].notna() & (df['workout_duration'] > 0)].copy() if 'workout_duration'  in df.columns else pd.DataFrame()
-df_wint     = df[df['workout_intensity'].notna() & (df['workout_intensity'] > 0)].copy() if 'workout_intensity' in df.columns else pd.DataFrame()
-df_wlab     = df.copy() if 'workout_label' in df.columns else pd.DataFrame()
+df_hr    = df[df['heartrate'].notna()         & (df['heartrate']         > 0)].copy() if 'heartrate'         in df.columns else pd.DataFrame()
+df_steps = df[df['steps'].notna()             & (df['steps']             > 0)].copy() if 'steps'             in df.columns else pd.DataFrame()
+df_wdur  = df[df['workout_duration'].notna()  & (df['workout_duration']  > 0)].copy() if 'workout_duration'  in df.columns else pd.DataFrame()
+df_wint  = df[df['workout_intensity'].notna() & (df['workout_intensity'] > 0)].copy() if 'workout_intensity' in df.columns else pd.DataFrame()
+df_wlab  = df.copy() if 'workout_label' in df.columns else pd.DataFrame()
 if not df_wlab.empty:
     try:
         df_wlab = df_wlab[pd.to_numeric(df_wlab['workout_label'], errors='coerce').fillna(0) > 0]
     except Exception:
         df_wlab = pd.DataFrame()
 
-has_cgm   = not df_cgm.empty
-has_meals = not df_meals.empty
-has_ins   = not df_bolus.empty or not df_ins.empty or not df_basal.empty
+has_cgm      = not df_cgm.empty
+has_meals    = not df_meals.empty
+has_ins      = not df_bolus.empty or not df_ins.empty or not df_basal.empty
 has_activity = not df_hr.empty or not df_steps.empty or not df_wdur.empty or not df_wint.empty or not df_wlab.empty
 
 # ── Debug expander ────────────────────────────────────────────────────────────
 with st.expander("Debug — current window data", expanded=False):
     d1, d2, d3, d4 = st.columns(4)
-    d1.metric("Total rows", len(df))
-    d2.metric("Valid CGM rows", len(df_cgm))
-    d3.metric("Carbs > 0", len(df_meals))
-    d4.metric("Insulin > 0", len(df_bolus) + len(df_ins))
+    d1.metric("Total rows",      len(df))
+    d2.metric("Valid CGM rows",  len(df_cgm))
+    d3.metric("Carbs > 0",       len(df_meals))
+    d4.metric("Insulin > 0",     len(df_bolus) + len(df_ins))
     null_info = pd.DataFrame({
         "Column": ["CGM","carbs","bolus","insulin","basal","heartrate","steps","workout_duration","workout_intensity"],
         "Valid values": [
             int(df['CGM'].notna().sum()),
-            int((df['carbs']>0).sum()) if df['carbs'].notna().any() else 0,
-            int((df['bolus']>0).sum()) if df['bolus'].notna().any() else 0,
-            int((df['insulin']>0).sum()) if df['insulin'].notna().any() else 0,
-            int((df['basal']>0).sum()) if df['basal'].notna().any() else 0,
-            int((df['heartrate']>0).sum()) if 'heartrate' in df.columns and df['heartrate'].notna().any() else 0,
-            int((df['steps']>0).sum()) if 'steps' in df.columns and df['steps'].notna().any() else 0,
-            int((df['workout_duration']>0).sum()) if 'workout_duration' in df.columns and df['workout_duration'].notna().any() else 0,
-            int((df['workout_intensity']>0).sum()) if 'workout_intensity' in df.columns and df['workout_intensity'].notna().any() else 0,
+            int((df['carbs']   > 0).sum()) if df['carbs'].notna().any()   else 0,
+            int((df['bolus']   > 0).sum()) if df['bolus'].notna().any()   else 0,
+            int((df['insulin'] > 0).sum()) if df['insulin'].notna().any() else 0,
+            int((df['basal']   > 0).sum()) if df['basal'].notna().any()   else 0,
+            int((df['heartrate']        > 0).sum()) if 'heartrate'         in df.columns and df['heartrate'].notna().any()         else 0,
+            int((df['steps']            > 0).sum()) if 'steps'             in df.columns and df['steps'].notna().any()             else 0,
+            int((df['workout_duration'] > 0).sum()) if 'workout_duration'  in df.columns and df['workout_duration'].notna().any()  else 0,
+            int((df['workout_intensity']> 0).sum()) if 'workout_intensity' in df.columns and df['workout_intensity'].notna().any() else 0,
         ],
-        "NULL": [df[c].isna().sum() if c in df.columns else "-" for c in ['CGM','carbs','bolus','insulin','basal','heartrate','steps','workout_duration','workout_intensity']],
+        "NULL": [df[c].isna().sum() if c in df.columns else "-"
+                 for c in ['CGM','carbs','bolus','insulin','basal','heartrate','steps','workout_duration','workout_intensity']],
     })
     st.dataframe(null_info, use_container_width=True, hide_index=True)
 
@@ -551,74 +574,57 @@ if not has_cgm and not has_meals and not has_ins and not has_activity:
 
 # ── CGM metrics ───────────────────────────────────────────────────────────────
 if has_cgm:
-    tir      = ((df_cgm['CGM'] >= 70) & (df_cgm['CGM'] <= 180)).mean() * 100
-    hypo_70  = (df_cgm['CGM'] < 70).mean()  * 100
-    hypo_80  = (df_cgm['CGM'] < 80).mean()  * 100
-    hypo_50  = (df_cgm['CGM'] < 50).mean()  * 100
-    hyper_180= (df_cgm['CGM'] > 180).mean() * 100
-    hyper_140= (df_cgm['CGM'] > 140).mean() * 100
-    avg_cgm  = df_cgm['CGM'].mean()
-    sd_cgm   = df_cgm['CGM'].std()
-    cv_cgm   = (sd_cgm / avg_cgm) * 100 if avg_cgm > 0 else 0
-    tr       = 100 - (hypo_70  + hyper_180)
-    ttr      = 100 - (hypo_80  + hyper_140)
-
-    # Card CSS più compatte
-    st.markdown("""
-    <style>
-    .metric-card-sm {
-        background: #f8f9fa; border: 1px solid #dee2e6;
-        border-radius: 10px; padding: 0.55rem 0.4rem;
-        text-align: center;
-    }
-    .metric-val-sm { font-size: 1.25rem; font-weight: 700; }
-    .metric-lbl-sm { font-size: 0.65rem; color: #888;
-                     text-transform: uppercase; letter-spacing: 0.08em; }
-    </style>
-    """, unsafe_allow_html=True)
+    tir       = ((df_cgm['CGM'] >= 70) & (df_cgm['CGM'] <= 180)).mean() * 100
+    hypo_70   = (df_cgm['CGM'] < 70).mean()  * 100
+    hypo_80   = (df_cgm['CGM'] < 80).mean()  * 100
+    hypo_50   = (df_cgm['CGM'] < 50).mean()  * 100
+    hyper_180 = (df_cgm['CGM'] > 180).mean() * 100
+    hyper_140 = (df_cgm['CGM'] > 140).mean() * 100
+    avg_cgm   = df_cgm['CGM'].mean()
+    sd_cgm    = df_cgm['CGM'].std()
+    cv_cgm    = (sd_cgm / avg_cgm) * 100 if avg_cgm > 0 else 0
+    tr        = 100 - (hypo_70  + hyper_180)
+    ttr       = 100 - (hypo_80  + hyper_140)
 
     def metric_card(col, val, lbl, color):
-            col.markdown(
-                f'<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; '
-                f'padding:0.4rem 0.6rem; text-align:center; white-space:nowrap;">'
-                f'<span style="font-size:0.65rem; color:#888; text-transform:uppercase; '
-                f'letter-spacing:0.26em;">{lbl}: </span>'
-                f'<span style="font-size:1.05rem; font-weight:700; color:{color};">{val}</span>'
-                f'</div>',
-                unsafe_allow_html=True
-            )
+        col.markdown(
+            f'<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; '
+            f'padding:0.4rem 0.6rem; text-align:center; white-space:nowrap;">'
+            f'<span style="font-size:0.65rem; color:#888; text-transform:uppercase; '
+            f'letter-spacing:0.06em;">{lbl}: </span>'
+            f'<span style="font-size:0.85rem; font-weight:700; color:{color};">{val}</span>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     # Riga 1 — statistiche di base
     c1, c2, c3, c4 = st.columns(4)
-    metric_card(c1, f"{avg_cgm:.1f} mg/dL", "Average CGM",   "#3498db")
-    metric_card(c2, f"{sd_cgm:.1f} mg/dL",  "SD CGM",        "#3498db")
-    metric_card(c3, f"{cv_cgm:.1f}%",        "CV CGM",        "#3498db")
+    metric_card(c1, f"{avg_cgm:.1f} mg/dL", "Average CGM",      "#3498db")
+    metric_card(c2, f"{sd_cgm:.1f} mg/dL",  "SD CGM",           "#3498db")
+    metric_card(c3, f"{cv_cgm:.1f}%",        "CV CGM",           "#3498db")
     metric_card(c4, f"{ttr:.1f}%",           "TIR tight 80–140", "#2ecc71")
 
     st.markdown("<div style='margin-top:0.4rem'></div>", unsafe_allow_html=True)
 
     # Riga 2 — range e soglie
     c5, c6, c7, c8 = st.columns(4)
-    metric_card(c5, f"{tr:.1f}%",       "TIR 70–180",  "#46d446")
-    metric_card(c6, f"{hyper_180:.1f}%","Time > 180",  "#f39c12")
-    metric_card(c7, f"{hypo_70:.1f}%",  "Time < 70",   "#f39c12")
-    metric_card(c8, f"{hypo_50:.1f}%",  "Time < 50",   "#e74c3c")
+    metric_card(c5, f"{tr:.1f}%",        "TIR 70–180", "#46d446")
+    metric_card(c6, f"{hyper_180:.1f}%", "Time > 180", "#f39c12")
+    metric_card(c7, f"{hypo_70:.1f}%",   "Time < 70",  "#f39c12")
+    metric_card(c8, f"{hypo_50:.1f}%",   "Time < 50",  "#e74c3c")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Dynamic subplots ──────────────────────────────────────────────────────────
 rows = []
-if has_cgm or has_meals:  rows.append(("CGM (mg/dL) & Carbs (g)", 0.50))
-if has_ins:               rows.append(("Insulin / Basal",         0.25))
-if has_activity:          rows.append(("Activity",                0.25))
+if has_cgm or has_meals: rows.append(("CGM (mg/dL) & Carbs (g)", 0.50))
+if has_ins:              rows.append(("Insulin / Basal",          0.25))
+if has_activity:         rows.append(("Activity",                 0.25))
 
 n_rows      = len(rows)
-row_heights = [r[1]/sum(r[1] for r in rows) for r in rows]
+row_heights = [r[1] / sum(r[1] for r in rows) for r in rows]
 
-# secondary_y only on first subplot (CGM + carbs)
-specs = []
-for i in range(n_rows):
-    specs.append([{"secondary_y": (i == 0)}])
+specs = [[{"secondary_y": (i == 0)}] for i in range(n_rows)]
 
 fig = make_subplots(
     rows=n_rows, cols=1,
@@ -629,9 +635,8 @@ fig = make_subplots(
     specs=specs,
 )
 
-# Map subplot labels to row indices
-cgm_row      = next((i+1 for i, r in enumerate(rows) if "CGM" in r[0]),      None)
-ins_row      = next((i+1 for i, r in enumerate(rows) if "Insulin" in r[0]),  None)
+cgm_row      = next((i+1 for i, r in enumerate(rows) if "CGM"      in r[0]), None)
+ins_row      = next((i+1 for i, r in enumerate(rows) if "Insulin"  in r[0]), None)
 activity_row = next((i+1 for i, r in enumerate(rows) if "Activity" in r[0]), None)
 
 x_range = [window_start, window_end]
@@ -640,13 +645,7 @@ x_range = [window_start, window_end]
 if cgm_row:
 
 
-    if has_cgm:
-        fig.add_trace(go.Scatter(
-            x=df_cgm['date'], y=df_cgm['CGM'],
-            mode='lines', name='CGM',
-            line=dict(color='#2980b9', width=1.8),
-        ), row=cgm_row, col=1, secondary_y=False)
-
+    # Meals PRIMA — così CGM viene disegnato sopra i cerchietti
     if has_meals:
         fig.add_trace(go.Scatter(
             x=df_meals['date'], y=df_meals['carbs'],
@@ -654,9 +653,16 @@ if cgm_row:
             marker=dict(symbol='circle', size=11, color='#2ecc71',
                         line=dict(color='white', width=1.5)),
             hovertemplate='<b>Meal</b><br>Carbs: %{y} g<br>%{x|%H:%M}<extra></extra>',
-        ), row=cgm_row, col=1, secondary_y=True)    
+        ), row=cgm_row, col=1, secondary_y=True)
+
+    # CGM DOPO — viene renderizzato sopra i meal markers
+    if has_cgm:
+        fig.add_trace(go.Scatter(
+            x=df_cgm['date'], y=df_cgm['CGM'],
+            mode='lines', name='CGM',
+            line=dict(color='#2980b9', width=1.8),
+        ), row=cgm_row, col=1, secondary_y=False)
         
-    
     # Rosso: sotto 50 (ipoglicemia severa)
     fig.add_hrect(y0=0,   y1=50,  fillcolor="rgba(231,76,60,0.10)",   line_width=0, row=cgm_row, col=1)
     # Verdino: tra 50 e 70 (ipoglicemia lieve)
@@ -669,8 +675,6 @@ if cgm_row:
     fig.add_hrect(y0=140, y1=180, fillcolor="rgba(39,174,96,0.05)",   line_width=0, row=cgm_row, col=1)
     # Arancione scuro: sopra 180 (iperglicemia)
     fig.add_hrect(y0=180, y1=400, fillcolor="rgba(211,84,0,0.05)",    line_width=0, row=cgm_row, col=1)
-        
-
 
 # ── Insulin ───────────────────────────────────────────────────────────────────
 if ins_row:
@@ -690,15 +694,12 @@ if ins_row:
 
 # ── Activity subplot ──────────────────────────────────────────────────────────
 if activity_row:
-    # Heart Rate — line
     if not df_hr.empty:
         fig.add_trace(go.Scatter(
             x=df_hr['date'], y=df_hr['heartrate'],
             mode='lines', name='Heart Rate (bpm)',
             line=dict(color='#e74c3c', width=1.5),
         ), row=activity_row, col=1)
-
-    # Steps — filled area
     if not df_steps.empty:
         fig.add_trace(go.Scatter(
             x=df_steps['date'], y=df_steps['steps'],
@@ -706,8 +707,6 @@ if activity_row:
             line=dict(color='#9b59b6', width=1.2),
             fill='tozeroy', fillcolor='rgba(155,89,182,0.15)',
         ), row=activity_row, col=1)
-
-    # Workout Duration — bars
     if not df_wdur.empty:
         fig.add_trace(go.Bar(
             x=df_wdur['date'], y=df_wdur['workout_duration'],
@@ -715,8 +714,6 @@ if activity_row:
             marker_color='rgba(243,156,18,0.7)',
             marker_line_color='#e67e22', marker_line_width=1,
         ), row=activity_row, col=1)
-
-    # Workout Intensity — markers
     if not df_wint.empty:
         fig.add_trace(go.Scatter(
             x=df_wint['date'], y=df_wint['workout_intensity'],
@@ -725,8 +722,6 @@ if activity_row:
                         line=dict(color='white', width=1)),
             hovertemplate='<b>Intensity</b>: %{y}<br>%{x|%H:%M}<extra></extra>',
         ), row=activity_row, col=1)
-
-    # Workout Label — scatter with label text
     if not df_wlab.empty:
         fig.add_trace(go.Scatter(
             x=df_wlab['date'],
@@ -747,21 +742,19 @@ if cgm_row:
                      showgrid=True, gridcolor="#eeeeee", row=cgm_row, col=1, secondary_y=False)
     fig.update_yaxes(title_text="Carbs (g)", range=[0, 250],
                      showgrid=False, row=cgm_row, col=1, secondary_y=True)
-
 if ins_row:
     fig.update_yaxes(title_text="U / U/h", showgrid=True, gridcolor="#eeeeee", row=ins_row, col=1)
-
 if activity_row:
     fig.update_yaxes(title_text="Activity", showgrid=True, gridcolor="#eeeeee", row=activity_row, col=1)
 
 fig.update_layout(
     template="plotly_white",
-    height=300 + 220 * n_rows,   # scale height with number of subplots
+    height=300 + 220 * n_rows,
     margin=dict(l=10, r=10, t=50, b=10),
     hovermode="x",
     legend=dict(
-        orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0,
-        bgcolor="rgba(255,255,255,0.9)", bordercolor="#dee2e6", borderwidth=1
+        orientation="h", yanchor="bottom", y=0.95, xanchor="left", x=0,
+        bgcolor="rgba(255,255,255,0.9)", bordercolor="#dee2e6", borderwidth=1,
     ),
 )
 
