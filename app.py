@@ -646,6 +646,27 @@ fig = make_subplots(
 
 x_range = [window_start, window_end]
 
+# ── Helper: inserisce NaN dove il gap è > 2× l'intervallo mediano ─────────────
+def insert_gaps(df, date_col='date', threshold_factor=2):
+    if len(df) < 2:
+        return df
+    df = df.sort_values(date_col).reset_index(drop=True)
+    median_diff = df[date_col].diff().dropna().median()
+    inserts = []
+    for i in range(1, len(df)):
+        if df[date_col].iloc[i] - df[date_col].iloc[i-1] > median_diff * threshold_factor:
+            nan_row = {c: None for c in df.columns}
+            nan_row[date_col] = df[date_col].iloc[i-1] + median_diff
+            inserts.append((i, nan_row))
+    for offset, (i, row) in enumerate(inserts):
+        df = pd.concat([df.iloc[:i+offset], pd.DataFrame([row]), df.iloc[i+offset:]], ignore_index=True)
+    return df
+
+df_cgm   = insert_gaps(df_cgm)
+if not df_hr.empty:
+    df_hr    = insert_gaps(df_hr)
+
+
 # ── CGM + meals ───────────────────────────────────────────────────────────────
 if cgm_row:
     # Meals PRIMA — così CGM viene disegnato sopra i cerchietti
