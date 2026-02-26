@@ -624,7 +624,16 @@ if has_activity:         rows.append(("Activity",                 0.25))
 n_rows      = len(rows)
 row_heights = [r[1] / sum(r[1] for r in rows) for r in rows]
 
-specs = [[{"secondary_y": (i == 0)}] for i in range(n_rows)]
+# ── FIX: definisci gli indici di riga PRIMA di costruire specs e make_subplots ──
+cgm_row      = next((i+1 for i, r in enumerate(rows) if "CGM"      in r[0]), None)
+ins_row      = next((i+1 for i, r in enumerate(rows) if "Insulin"  in r[0]), None)
+activity_row = next((i+1 for i, r in enumerate(rows) if "Activity" in r[0]), None)
+
+specs = []
+for i in range(n_rows):
+    is_cgm      = (cgm_row      is not None and i == cgm_row - 1)
+    is_activity = (activity_row is not None and i == activity_row - 1)
+    specs.append([{"secondary_y": is_cgm or is_activity}])
 
 fig = make_subplots(
     rows=n_rows, cols=1,
@@ -635,16 +644,10 @@ fig = make_subplots(
     specs=specs,
 )
 
-cgm_row      = next((i+1 for i, r in enumerate(rows) if "CGM"      in r[0]), None)
-ins_row      = next((i+1 for i, r in enumerate(rows) if "Insulin"  in r[0]), None)
-activity_row = next((i+1 for i, r in enumerate(rows) if "Activity" in r[0]), None)
-
 x_range = [window_start, window_end]
 
 # ── CGM + meals ───────────────────────────────────────────────────────────────
 if cgm_row:
-
-
     # Meals PRIMA — così CGM viene disegnato sopra i cerchietti
     if has_meals:
         fig.add_trace(go.Scatter(
@@ -662,13 +665,13 @@ if cgm_row:
             mode='lines', name='CGM',
             line=dict(color='#2980b9', width=1.8),
         ), row=cgm_row, col=1, secondary_y=False)
-        
+
     # Rosso: sotto 50 (ipoglicemia severa)
     fig.add_hrect(y0=0,   y1=50,  fillcolor="rgba(231,76,60,0.10)",   line_width=0, row=cgm_row, col=1)
     # Verdino: tra 50 e 70 (ipoglicemia lieve)
-    fig.add_hrect(y0=50,  y1=70,  fillcolor="rgba(211,84,0,0.05)",   line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=50,  y1=70,  fillcolor="rgba(211,84,0,0.05)",    line_width=0, row=cgm_row, col=1)
     # Arancione scuro: tra 70 e 80 (zona limite bassa)
-    fig.add_hrect(y0=70,  y1=80,  fillcolor="rgba(39,174,96,0.03)",    line_width=0, row=cgm_row, col=1)# rgba(211,84,0,0.20)
+    fig.add_hrect(y0=70,  y1=80,  fillcolor="rgba(39,174,96,0.03)",   line_width=0, row=cgm_row, col=1)
     # Verde: range ottimale 80–140
     fig.add_hrect(y0=80,  y1=140, fillcolor="rgba(46,204,113,0.15)",  line_width=0, row=cgm_row, col=1)
     # Verdino: tra 140 e 180 (zona limite alta)
@@ -699,14 +702,14 @@ if activity_row:
             x=df_hr['date'], y=df_hr['heartrate'],
             mode='lines', name='Heart Rate (bpm)',
             line=dict(color='#e74c3c', width=1.5),
-        ), row=activity_row, col=1)
+        ), row=activity_row, col=1, secondary_y=True)
     if not df_steps.empty:
         fig.add_trace(go.Scatter(
             x=df_steps['date'], y=df_steps['steps'],
             mode='lines', name='Steps',
             line=dict(color='#9b59b6', width=1.2),
             fill='tozeroy', fillcolor='rgba(155,89,182,0.15)',
-        ), row=activity_row, col=1)
+        ), row=activity_row, col=1, secondary_y=False)
     if not df_wdur.empty:
         fig.add_trace(go.Bar(
             x=df_wdur['date'], y=df_wdur['workout_duration'],
@@ -740,13 +743,16 @@ fig.update_xaxes(range=x_range, showgrid=True, gridcolor="#f0f0f0", tickformat="
 
 if cgm_row:
     fig.update_yaxes(title_text="Glucose (mg/dL)", range=[0, 400],
-                     showgrid=True, gridcolor="#eeeeee", row=cgm_row, col=1, secondary_y=False)
-    fig.update_yaxes(title_text="Carbs (g)", range=[0, 250],
+                     showgrid=True,  gridcolor="#eeeeee", row=cgm_row, col=1, secondary_y=False)
+    fig.update_yaxes(title_text="Carbs (g)",        range=[0, 250],
                      showgrid=False, row=cgm_row, col=1, secondary_y=True)
 if ins_row:
     fig.update_yaxes(title_text="U / U/h", showgrid=True, gridcolor="#eeeeee", row=ins_row, col=1)
 if activity_row:
-    fig.update_yaxes(title_text="Activity", showgrid=True, gridcolor="#eeeeee", row=activity_row, col=1)
+    fig.update_yaxes(title_text="Steps",            range=[0, 1000],
+                     showgrid=True,  gridcolor="#eeeeee", row=activity_row, col=1, secondary_y=False)
+    fig.update_yaxes(title_text="Heart Rate (bpm)", range=[50, 200],
+                     showgrid=False, row=activity_row, col=1, secondary_y=True)
 
 fig.update_layout(
     template="plotly_white",
