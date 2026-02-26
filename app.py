@@ -552,15 +552,26 @@ if not has_cgm and not has_meals and not has_ins and not has_activity:
 # ── CGM metrics ───────────────────────────────────────────────────────────────
 if has_cgm:
     tir     = ((df_cgm['CGM'] >= 70) & (df_cgm['CGM'] <= 180)).mean() * 100
-    hypo    = (df_cgm['CGM'] < 70).mean() * 100
-    hyper   = (df_cgm['CGM'] > 180).mean() * 100
+    hypo_70    = (df_cgm['CGM'] < 70).mean() * 100
+    hypo_80    = (df_cgm['CGM'] < 80).mean() * 100
+    hypo_50    = (df_cgm['CGM'] < 50).mean() * 100
+    hyper_180   = (df_cgm['CGM'] > 180).mean() * 100
+    hyper_140   = (df_cgm['CGM'] > 140).mean() * 100
     avg_cgm = df_cgm['CGM'].mean()
-    c1, c2, c3, c4 = st.columns(4)
+    sd_cgm  = df_cgm['CGM'].std()
+    cv_cgm = (sd_cgm / avg_cgm) * 100 if avg_cgm > 0 else 0
+    tr = 100 - (hypo_70 + hyper_180)
+    ttr = 100 - (hypo_80 + hyper_140)
+    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
     for col, val, lbl, color in [
-        (c1, f"{tir:.1f}%",          "Time in Range",      "#2ecc71"),
-        (c2, f"{hypo:.1f}%",         "Hypoglycemia <70",   "#e74c3c"),
-        (c3, f"{hyper:.1f}%",        "Hyperglycemia >180", "#e67e22"),
-        (c4, f"{avg_cgm:.0f} mg/dL", "Mean CGM",           "#2980b9"),
+    (c1, f"{avg_cgm:.1f}%",          "Average CGM",                  "#3498db"), # 
+        (c2, f"{sd_cgm:.1f}%",           "STD CGM",                      "#3498db"), # 
+        (c3, f"{cv_cgm:.1f}%",           "CV CGM",                       "#3498db"), # 
+        (c4, f"{tr:.1f}%",               "Time in Range (70-180)",       "#46d446"), # 
+        (c5, f"{ttr:.1f}%",              "Time tight in Range (80-140)", "#2ecc71"), # 
+        (c6, f"{hyper_180:.1f}%",        "Time > 180",                   "#f39c12"), #
+        (c7, f"{hypo_70:.1f}%",          "Time < 70",                    "#f39c12"), # 
+        (c8, f"{hypo_50:.1f}%",          "Time < 50",                    "#e74c3c"), # 
     ]:
         col.markdown(
             f'<div class="metric-card"><div class="metric-val" style="color:{color}">{val}</div><div class="metric-lbl">{lbl}</div></div>',
@@ -600,9 +611,7 @@ x_range = [window_start, window_end]
 
 # ── CGM + meals ───────────────────────────────────────────────────────────────
 if cgm_row:
-    fig.add_hrect(y0=0,   y1=70,  fillcolor="rgba(231,76,60,0.13)",  line_width=0, row=cgm_row, col=1)
-    fig.add_hrect(y0=70,  y1=180, fillcolor="rgba(46,204,113,0.10)", line_width=0, row=cgm_row, col=1)
-    fig.add_hrect(y0=180, y1=400, fillcolor="rgba(230,126,34,0.10)", line_width=0, row=cgm_row, col=1)
+
 
     if has_cgm:
         fig.add_trace(go.Scatter(
@@ -618,7 +627,20 @@ if cgm_row:
             marker=dict(symbol='circle', size=11, color='#2ecc71',
                         line=dict(color='white', width=1.5)),
             hovertemplate='<b>Meal</b><br>Carbs: %{y} g<br>%{x|%H:%M}<extra></extra>',
-        ), row=cgm_row, col=1, secondary_y=True)
+        ), row=cgm_row, col=1, secondary_y=True)    
+        
+    # Rosso: sotto 50 (ipoglicemia severa)
+    fig.add_hrect(y0=0,   y1=50,  fillcolor="rgba(231,76,60,0.25)",   line_width=0, row=cgm_row, col=1)
+    # Verdino: tra 50 e 70 (ipoglicemia lieve)
+    fig.add_hrect(y0=50,  y1=70,  fillcolor="rgba(211,84,0,0.20)",   line_width=0, row=cgm_row, col=1)
+    # Arancione scuro: tra 70 e 80 (zona limite bassa)
+    fig.add_hrect(y0=70,  y1=80,  fillcolor="rgba(39,174,96,0.18)",    line_width=0, row=cgm_row, col=1)# rgba(211,84,0,0.20)
+    # Verde: range ottimale 80–140
+    fig.add_hrect(y0=80,  y1=140, fillcolor="rgba(46,204,113,0.30)",  line_width=0, row=cgm_row, col=1)
+    # Verdino: tra 140 e 180 (zona limite alta)
+    fig.add_hrect(y0=140, y1=180, fillcolor="rgba(39,174,96,0.18)",   line_width=0, row=cgm_row, col=1)
+    # Arancione scuro: sopra 180 (iperglicemia)
+    fig.add_hrect(y0=180, y1=400, fillcolor="rgba(211,84,0,0.20)",    line_width=0, row=cgm_row, col=1)
 
 # ── Insulin ───────────────────────────────────────────────────────────────────
 if ins_row:
