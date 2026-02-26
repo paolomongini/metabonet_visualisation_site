@@ -629,18 +629,21 @@ if cgm_row:
             hovertemplate='<b>Meal</b><br>Carbs: %{y} g<br>%{x|%H:%M}<extra></extra>',
         ), row=cgm_row, col=1, secondary_y=True)    
         
+    
     # Rosso: sotto 50 (ipoglicemia severa)
-    fig.add_hrect(y0=0,   y1=50,  fillcolor="rgba(231,76,60,0.25)",   line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=0,   y1=50,  fillcolor="rgba(231,76,60,0.10)",   line_width=0, row=cgm_row, col=1)
     # Verdino: tra 50 e 70 (ipoglicemia lieve)
-    fig.add_hrect(y0=50,  y1=70,  fillcolor="rgba(211,84,0,0.20)",   line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=50,  y1=70,  fillcolor="rgba(211,84,0,0.05)",   line_width=0, row=cgm_row, col=1)
     # Arancione scuro: tra 70 e 80 (zona limite bassa)
-    fig.add_hrect(y0=70,  y1=80,  fillcolor="rgba(39,174,96,0.18)",    line_width=0, row=cgm_row, col=1)# rgba(211,84,0,0.20)
+    fig.add_hrect(y0=70,  y1=80,  fillcolor="rgba(39,174,96,0.03)",    line_width=0, row=cgm_row, col=1)# rgba(211,84,0,0.20)
     # Verde: range ottimale 80–140
-    fig.add_hrect(y0=80,  y1=140, fillcolor="rgba(46,204,113,0.30)",  line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=80,  y1=140, fillcolor="rgba(46,204,113,0.15)",  line_width=0, row=cgm_row, col=1)
     # Verdino: tra 140 e 180 (zona limite alta)
-    fig.add_hrect(y0=140, y1=180, fillcolor="rgba(39,174,96,0.18)",   line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=140, y1=180, fillcolor="rgba(39,174,96,0.05)",   line_width=0, row=cgm_row, col=1)
     # Arancione scuro: sopra 180 (iperglicemia)
-    fig.add_hrect(y0=180, y1=400, fillcolor="rgba(211,84,0,0.20)",    line_width=0, row=cgm_row, col=1)
+    fig.add_hrect(y0=180, y1=400, fillcolor="rgba(211,84,0,0.05)",    line_width=0, row=cgm_row, col=1)
+        
+
 
 # ── Insulin ───────────────────────────────────────────────────────────────────
 if ins_row:
