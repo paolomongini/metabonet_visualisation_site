@@ -711,6 +711,7 @@ if activity_row:
         fig.add_trace(go.Bar(
             x=df_wdur['date'], y=df_wdur['workout_duration'],
             name='Workout Duration (min)',
+            width=(df_wdur['workout_duration'] * 60 * 1000).tolist(),  # minuti → ms
             marker_color='rgba(243,156,18,0.7)',
             marker_line_color='#e67e22', marker_line_width=1,
         ), row=activity_row, col=1)
