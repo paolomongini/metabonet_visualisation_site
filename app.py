@@ -551,32 +551,59 @@ if not has_cgm and not has_meals and not has_ins and not has_activity:
 
 # ── CGM metrics ───────────────────────────────────────────────────────────────
 if has_cgm:
-    tir     = ((df_cgm['CGM'] >= 70) & (df_cgm['CGM'] <= 180)).mean() * 100
-    hypo_70    = (df_cgm['CGM'] < 70).mean() * 100
-    hypo_80    = (df_cgm['CGM'] < 80).mean() * 100
-    hypo_50    = (df_cgm['CGM'] < 50).mean() * 100
-    hyper_180   = (df_cgm['CGM'] > 180).mean() * 100
-    hyper_140   = (df_cgm['CGM'] > 140).mean() * 100
-    avg_cgm = df_cgm['CGM'].mean()
-    sd_cgm  = df_cgm['CGM'].std()
-    cv_cgm = (sd_cgm / avg_cgm) * 100 if avg_cgm > 0 else 0
-    tr = 100 - (hypo_70 + hyper_180)
-    ttr = 100 - (hypo_80 + hyper_140)
-    c1, c2, c3, c4, c5, c6, c7, c8 = st.columns(8)
-    for col, val, lbl, color in [
-    (c1, f"{avg_cgm:.1f}%",          "Average CGM",                  "#3498db"), # 
-        (c2, f"{sd_cgm:.1f}%",           "STD CGM",                      "#3498db"), # 
-        (c3, f"{cv_cgm:.1f}%",           "CV CGM",                       "#3498db"), # 
-        (c4, f"{tr:.1f}%",               "Time in Range (70-180)",       "#46d446"), # 
-        (c5, f"{ttr:.1f}%",              "Time tight in Range (80-140)", "#2ecc71"), # 
-        (c6, f"{hyper_180:.1f}%",        "Time > 180",                   "#f39c12"), #
-        (c7, f"{hypo_70:.1f}%",          "Time < 70",                    "#f39c12"), # 
-        (c8, f"{hypo_50:.1f}%",          "Time < 50",                    "#e74c3c"), # 
-    ]:
-        col.markdown(
-            f'<div class="metric-card"><div class="metric-val" style="color:{color}">{val}</div><div class="metric-lbl">{lbl}</div></div>',
-            unsafe_allow_html=True
-        )
+    tir      = ((df_cgm['CGM'] >= 70) & (df_cgm['CGM'] <= 180)).mean() * 100
+    hypo_70  = (df_cgm['CGM'] < 70).mean()  * 100
+    hypo_80  = (df_cgm['CGM'] < 80).mean()  * 100
+    hypo_50  = (df_cgm['CGM'] < 50).mean()  * 100
+    hyper_180= (df_cgm['CGM'] > 180).mean() * 100
+    hyper_140= (df_cgm['CGM'] > 140).mean() * 100
+    avg_cgm  = df_cgm['CGM'].mean()
+    sd_cgm   = df_cgm['CGM'].std()
+    cv_cgm   = (sd_cgm / avg_cgm) * 100 if avg_cgm > 0 else 0
+    tr       = 100 - (hypo_70  + hyper_180)
+    ttr      = 100 - (hypo_80  + hyper_140)
+
+    # Card CSS più compatte
+    st.markdown("""
+    <style>
+    .metric-card-sm {
+        background: #f8f9fa; border: 1px solid #dee2e6;
+        border-radius: 10px; padding: 0.55rem 0.4rem;
+        text-align: center;
+    }
+    .metric-val-sm { font-size: 1.25rem; font-weight: 700; }
+    .metric-lbl-sm { font-size: 0.65rem; color: #888;
+                     text-transform: uppercase; letter-spacing: 0.08em; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    def metric_card(col, val, lbl, color):
+            col.markdown(
+                f'<div style="background:#f8f9fa; border:1px solid #dee2e6; border-radius:8px; '
+                f'padding:0.4rem 0.6rem; text-align:center; white-space:nowrap;">'
+                f'<span style="font-size:0.65rem; color:#888; text-transform:uppercase; '
+                f'letter-spacing:0.26em;">{lbl}: </span>'
+                f'<span style="font-size:1.05rem; font-weight:700; color:{color};">{val}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+    # Riga 1 — statistiche di base
+    c1, c2, c3, c4 = st.columns(4)
+    metric_card(c1, f"{avg_cgm:.1f} mg/dL", "Average CGM",   "#3498db")
+    metric_card(c2, f"{sd_cgm:.1f} mg/dL",  "SD CGM",        "#3498db")
+    metric_card(c3, f"{cv_cgm:.1f}%",        "CV CGM",        "#3498db")
+    metric_card(c4, f"{ttr:.1f}%",           "TIR tight 80–140", "#2ecc71")
+
+    st.markdown("<div style='margin-top:0.4rem'></div>", unsafe_allow_html=True)
+
+    # Riga 2 — range e soglie
+    c5, c6, c7, c8 = st.columns(4)
+    metric_card(c5, f"{tr:.1f}%",       "TIR 70–180",  "#46d446")
+    metric_card(c6, f"{hyper_180:.1f}%","Time > 180",  "#f39c12")
+    metric_card(c7, f"{hypo_70:.1f}%",  "Time < 70",   "#f39c12")
+    metric_card(c8, f"{hypo_50:.1f}%",  "Time < 50",   "#e74c3c")
+
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ── Dynamic subplots ──────────────────────────────────────────────────────────
